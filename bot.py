@@ -4,6 +4,8 @@ import base64
 import json
 import os
 import shutil
+import subprocess
+import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time, timedelta
@@ -14,6 +16,8 @@ from dotenv import load_dotenv
 from telegram import BotCommand, BotCommandScopeAllGroupChats, InputFile, Update
 from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
 import ventusky_capture
 import weather_report
@@ -294,6 +298,7 @@ def main() -> None:
     if not token:
         raise SystemExit("Встановіть TELEGRAM_BOT_TOKEN.")
 
+    ensure_playwright_browser()
     channels_cfg, ventusky_cfg = load_config()
 
     app = ApplicationBuilder().token(token).post_init(post_init).build()
@@ -305,6 +310,21 @@ def main() -> None:
 
     schedule_jobs(app, channels_cfg, ventusky_cfg)
     app.run_polling()
+
+
+def ensure_playwright_browser() -> None:
+    try:
+        import playwright  # type: ignore
+    except Exception:
+        return
+    base = Path(playwright.__file__).resolve().parent
+    browser_dir = base / "driver" / "package" / ".local-browsers"
+    if browser_dir.exists() and list(browser_dir.glob("chromium*")):
+        return
+    subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        check=False,
+    )
 
 
 if __name__ == "__main__":
