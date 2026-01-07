@@ -13,7 +13,7 @@ aptPkgs = [
   "libxdamage1",
   "libxfixes3",
   "libxrandr2",
-  "libasound2",
+  "libasound2t64",
   "libxshmfence1",
   "libgbm1",
   "libpangocairo-1.0-0",
