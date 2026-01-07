@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import os
 from pathlib import Path
+
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
 from playwright.async_api import async_playwright
 
