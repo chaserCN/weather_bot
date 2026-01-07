@@ -1,0 +1,5 @@
+matplotlib>=3.7
+requests>=2.31
+playwright>=1.43
+python-telegram-bot[job-queue]>=21.0
+python-dotenv>=1.0
