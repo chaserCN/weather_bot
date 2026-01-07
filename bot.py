@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
+import asyncio
 import base64
 import json
 import os
+import shutil
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time, timedelta
 from pathlib import Path
@@ -9,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from telegram import BotCommand, BotCommandScopeAllGroupChats, InputFile, Update
+from telegram.constants import ChatAction
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 import ventusky_capture
@@ -122,6 +126,41 @@ def resolve_channel(channels_cfg: list[ChannelConfig], chat_id: int) -> ChannelC
     return None
 
 
+async def send_forecast24_with_today_text(
+    channel: ChannelConfig,
+    today: datetime.date,
+    out_dir: Path,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    _, _, report_text = await asyncio.to_thread(
+        weather_report.generate_daily_forecast, channel.city, today, out_dir
+    )
+    _, chart_path, _ = await asyncio.to_thread(
+        weather_report.generate_next24h_forecast, channel.city, out_dir
+    )
+    with chart_path.open("rb") as photo_file:
+        await update.message.reply_photo(
+            photo=InputFile(photo_file),
+            caption=report_text,
+        )
+
+
+async def run_with_chat_action(chat_id: int, context: ContextTypes.DEFAULT_TYPE, task):
+    async def ticker():
+        while True:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_PHOTO)
+            await asyncio.sleep(4)
+
+    ticker_task = asyncio.create_task(ticker())
+    try:
+        await task()
+    finally:
+        ticker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await ticker_task
+
+
 async def send_daily_forecast(
     chat_id: int,
     city: str,
@@ -188,17 +227,11 @@ async def forecast_24h(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     out_dir = Path("outputs/bot")
     today = datetime.now(KYIV_TZ).date()
-    _, _, report_text = weather_report.generate_daily_forecast(
-        channel.city, today, out_dir
+    await run_with_chat_action(
+        update.effective_chat.id,
+        context,
+        lambda: send_forecast24_with_today_text(channel, today, out_dir, update, context),
     )
-    _, chart_path, _ = weather_report.generate_next24h_forecast(
-        channel.city, out_dir
-    )
-    with chart_path.open("rb") as photo_file:
-        await update.message.reply_photo(
-            photo=InputFile(photo_file),
-            caption=report_text,
-        )
 
 
 async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -218,7 +251,11 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def ventusky_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ventusky_cfg: VentuskyConfig = context.bot_data["ventusky"]
-    await send_ventusky_square(update.effective_chat.id, ventusky_cfg, context)
+    await run_with_chat_action(
+        update.effective_chat.id,
+        context,
+        lambda: send_ventusky_square(update.effective_chat.id, ventusky_cfg, context),
+    )
 
 
 def schedule_jobs(app, channels_cfg: list[ChannelConfig], ventusky_cfg: VentuskyConfig) -> None:
@@ -272,4 +309,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-import shutil

@@ -326,7 +326,7 @@ def plot_chart_base(
     ax_precip.bar(times, precip, color="#ff7f0e", alpha=0.6, width=0.03)
     ax_precip.set_ylim(0, 100)
 
-    ax_temp.set_title(title, fontweight="semibold", pad=22)
+    fig.suptitle(title, fontweight="semibold", y=0.98)
     ax_temp.set_ylabel("Температура (°C)")
     ax_precip.set_ylabel("Ймовірність опадів (%)")
 
