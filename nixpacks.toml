@@ -31,4 +31,8 @@ aptPkgs = [
 ]
 
 [phases.install]
-cmds = ["python3 -m playwright install chromium"]
+cmds = [
+  "python3 -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install -r requirements.txt",
+  ". /opt/venv/bin/activate && python3 -m playwright install chromium"
+]
