@@ -10,6 +10,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import FixedLocator, FuncFormatter
+from matplotlib.transforms import Bbox
 import requests
 
 
@@ -136,6 +137,14 @@ def extract_hourly_range(data: dict, start_dt: datetime, end_dt: datetime):
     return items
 
 
+def extract_weekly_plot_data(data: dict):
+    daily_days = [datetime.fromisoformat(day).replace(tzinfo=KYIV_TZ) for day in data["daily"]["time"]]
+    daily_min = data["daily"]["temperature_2m_min"]
+    daily_max = data["daily"]["temperature_2m_max"]
+    daily_precip = data["daily"]["precipitation_probability_max"]
+    return daily_days, daily_min, daily_max, daily_precip
+
+
 def generate_daily_forecast(
     city_key: str,
     target_date: date,
@@ -165,10 +174,7 @@ def generate_daily_forecast(
     chart_path = out_dir / f"{base_name}.png"
 
     text_path.write_text(report_text, encoding="utf-8")
-    weekly_demo = False
-    daily_days = [datetime.fromisoformat(day).replace(tzinfo=KYIV_TZ) for day in data["daily"]["time"]]
-    daily_min = data["daily"]["temperature_2m_min"]
-    daily_max = data["daily"]["temperature_2m_max"]
+    daily_days, daily_min, daily_max, daily_precip = extract_weekly_plot_data(data)
     plot_chart_base(
         [item[0] for item in hourly_items],
         [item[1] for item in hourly_items],
@@ -181,6 +187,7 @@ def generate_daily_forecast(
         weekly_days=daily_days,
         weekly_min=daily_min,
         weekly_max=daily_max,
+        weekly_precip=daily_precip,
     )
     return text_path, chart_path, report_text
 
@@ -199,7 +206,7 @@ def generate_next24h_forecast(
 
     today = datetime.now(KYIV_TZ).date()
     days_ahead = (end_dt.date() - today).days
-    forecast_days = max(2, days_ahead + 1)
+    forecast_days = max(7, days_ahead + 1)
     data = fetch_forecast(city["lat"], city["lon"], forecast_days)
     hourly_items = extract_hourly_range(data, start_dt, end_dt)
     if not hourly_items:
@@ -217,7 +224,21 @@ def generate_next24h_forecast(
     times = [item[0] for item in hourly_items]
     temps = [item[1] for item in hourly_items]
     precip = [item[2] for item in hourly_items]
-    plot_chart_base(times, temps, precip, title, chart_path, start_dt, end_dt, debug_labels)
+    daily_days, daily_min, daily_max, daily_precip = extract_weekly_plot_data(data)
+    plot_chart_base(
+        times,
+        temps,
+        precip,
+        title,
+        chart_path,
+        start_dt,
+        end_dt,
+        debug_labels,
+        weekly_days=daily_days,
+        weekly_min=daily_min,
+        weekly_max=daily_max,
+        weekly_precip=daily_precip,
+    )
     return text_path, chart_path, report_text
 
 
@@ -366,11 +387,14 @@ def plot_chart_base(
 
     min_index = temps.index(temp_min)
     max_index = temps.index(temp_max)
-    annotate_indices = {0, len(temps) - 1, *labeled_indices}
+    annotate_indices = set(labeled_indices)
 
     ax_precip.bar(times, precip, color="#ff7f0e", alpha=0.6, width=0.03)
     ax_precip.set_ylim(0, 100)
     ax_precip.set_axisbelow(True)
+    ax_precip.set_yticks([0, 25, 50, 75, 100])
+    ax_precip.set_yticklabels(["0", "25", "50", "75", ""])
+    ax_precip.tick_params(axis="y", colors="#666666")
     for level in (25, 75):
         ax_precip.axhline(
             level,
@@ -380,9 +404,8 @@ def plot_chart_base(
             alpha=grid_style["alpha"],
         )
 
-    fig.suptitle(title, fontweight="semibold", y=0.985)
     ax_temp.set_ylabel("Темп. (°C)")
-    ax_precip.set_ylabel("Ймовір. оп. (%)")
+    ax_precip.set_ylabel("Ймовір. оп. (%)", color="#666666")
     if ax_week is not None:
         ax_week.set_ylabel("Темп. (°C)")
 
@@ -413,6 +436,25 @@ def plot_chart_base(
     axes_bbox = ax_temp.get_window_extent(renderer)
     placed_bboxes = []
 
+    def segment_intersects_bbox(p1, p2, bbox: Bbox) -> bool:
+        if bbox.contains(p1[0], p1[1]) or bbox.contains(p2[0], p2[1]):
+            return True
+
+        def ccw(a, b, c) -> bool:
+            return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+        def intersects(a, b, c, d) -> bool:
+            return ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d)
+
+        corners = [
+            (bbox.x0, bbox.y0),
+            (bbox.x1, bbox.y0),
+            (bbox.x1, bbox.y1),
+            (bbox.x0, bbox.y1),
+        ]
+        edges = list(zip(corners, corners[1:] + corners[:1]))
+        return any(intersects(p1, p2, e1, e2) for e1, e2 in edges)
+
     def place_label(index: int, required: bool) -> None:
         time = times[index]
         temp = temps[index]
@@ -426,21 +468,13 @@ def plot_chart_base(
             slope = temps[-1] - temps[-2]
 
         if index == max_index:
-            candidates = [
-                ((0, 10), "center", "bottom"),
-                ((8, 10), "left", "bottom"),
-                ((-8, 10), "right", "bottom"),
-            ]
+            candidates = [((0, 10), "center", "bottom"), ((0, -10), "center", "top")]
         elif index == min_index:
-            candidates = [
-                ((0, -10), "center", "top"),
-                ((8, -10), "left", "top"),
-                ((-8, -10), "right", "top"),
-            ]
+            candidates = [((0, -10), "center", "top"), ((0, 10), "center", "bottom")]
         elif slope < 0:
-            candidates = [((8, 10), "left", "bottom"), ((-8, -10), "right", "top")]
+            candidates = [((0, 10), "center", "bottom"), ((0, -10), "center", "top")]
         elif slope > 0:
-            candidates = [((-8, 10), "right", "bottom"), ((8, -10), "left", "top")]
+            candidates = [((0, -10), "center", "top"), ((0, 10), "center", "bottom")]
         else:
             candidates = [((0, 10), "center", "bottom"), ((0, -10), "center", "top")]
 
@@ -476,11 +510,25 @@ def plot_chart_base(
                     va=va,
                     fontsize=12,
                     clip_on=True,
-                    bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=0.3),
                 )
                 fig.canvas.draw()
                 bbox = text.get_window_extent(renderer)
                 point_disp = ax_temp.transData.transform((time_num, temp))
+                padded_bbox = Bbox.from_extents(
+                    bbox.x0 - 2,
+                    bbox.y0 - 2,
+                    bbox.x1 + 2,
+                    bbox.y1 + 2,
+                )
+                line_overlap = False
+                if index > 0:
+                    p1 = ax_temp.transData.transform((times_num[index - 1], temps[index - 1]))
+                    p2 = ax_temp.transData.transform((times_num[index], temps[index]))
+                    line_overlap |= segment_intersects_bbox(p1, p2, padded_bbox)
+                if index < len(temps) - 1:
+                    p1 = ax_temp.transData.transform((times_num[index], temps[index]))
+                    p2 = ax_temp.transData.transform((times_num[index + 1], temps[index + 1]))
+                    line_overlap |= segment_intersects_bbox(p1, p2, padded_bbox)
 
                 inside_axes = (
                     axes_bbox.contains(bbox.x0, bbox.y0)
@@ -493,11 +541,17 @@ def plot_chart_base(
 
                 if debug_labels:
                     print(
-                        f"    inside={inside_axes} overlap={overlaps} "
+                        f"    inside={inside_axes} overlap={overlaps} line={line_overlap} "
                         f"covers_point={covers_point} close_to_point={close_to_point}"
                     )
 
-                if inside_axes and not overlaps and not covers_point and not close_to_point:
+                if (
+                    inside_axes
+                    and not overlaps
+                    and not line_overlap
+                    and not covers_point
+                    and not close_to_point
+                ):
                     placed_bboxes.append(bbox)
                     if debug_labels:
                         print("    -> placed")
@@ -517,14 +571,12 @@ def plot_chart_base(
                 va="bottom",
                 fontsize=12,
                 clip_on=True,
-                bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=0.3),
             )
             fig.canvas.draw()
             placed_bboxes.append(text.get_window_extent(renderer))
 
-    required_indices = {0, len(temps) - 1}
     for idx in sorted(annotate_indices):
-        place_label(idx, required=idx in required_indices)
+        place_label(idx, required=False)
 
     ax_temp.grid(True, **grid_style)
     ax_precip.grid(True, **grid_style)
@@ -586,6 +638,7 @@ def plot_chart_base(
                     ha="center",
                     va="bottom",
                     fontsize=9,
+                    color="#666666",
                     clip_on=False,
                 )
         for day, tmin, tmax in zip(weekly_days, weekly_min, weekly_max):
@@ -637,6 +690,20 @@ def plot_chart_base(
             ax_week.set_position(
                 [pos_week.x0, pos_week.y0 - shift_down, pos_week.width, pos_week.height]
             )
+    if ax_week is not None:
+        fig.align_ylabels([ax_temp, ax_precip, ax_week])
+    else:
+        fig.align_ylabels([ax_temp, ax_precip])
+    pos_temp = ax_temp.get_position()
+    fig.text(
+        pos_temp.x1,
+        0.985,
+        title,
+        ha="right",
+        va="top",
+        fontsize=16,
+        fontweight="semibold",
+    )
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
 
@@ -659,50 +726,13 @@ def plot_chart(
 
 def main() -> None:
     args = parse_args()
-    city = CITY_COORDS[args.city]
     target_date = select_target_date(args.day, args.date)
-
-    today = datetime.now(KYIV_TZ).date()
-    days_ahead = (target_date - today).days
-    if days_ahead < 0:
-        raise SystemExit("Дата прогнозу вже минула.")
-    if days_ahead >= 16:
-        raise SystemExit("Доступний прогноз лише на 16 днів уперед.")
-
-    forecast_days = max(7, days_ahead + 1)
-    data = fetch_forecast(city["lat"], city["lon"], forecast_days)
-    hourly_items = extract_hourly(data, target_date)
-    if not hourly_items:
-        raise SystemExit("Немає погодинних даних для вибраної дати.")
-
-    weekly_lines = build_weekly_lines(data, today)
-    report_text = build_text_report(city["name"], target_date, hourly_items, weekly_lines)
-
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    base_name = build_base_name(args.city, args.day, args.date)
-    text_path = out_dir / f"{base_name}.txt"
-    chart_path = out_dir / f"{base_name}.png"
-
-    text_path.write_text(report_text, encoding="utf-8")
-    weekly_demo = False
-    daily_days = [datetime.fromisoformat(day).replace(tzinfo=KYIV_TZ) for day in data["daily"]["time"]]
-    daily_min = data["daily"]["temperature_2m_min"]
-    daily_max = data["daily"]["temperature_2m_max"]
-    daily_precip = data["daily"]["precipitation_probability_max"]
-    plot_chart_base(
-        [item[0] for item in hourly_items],
-        [item[1] for item in hourly_items],
-        [item[2] for item in hourly_items],
-        f"{city['name']} — {format_ua_date(target_date)}",
-        chart_path,
-        datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ),
-        datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ) + timedelta(hours=23),
+    text_path, chart_path, report_text = generate_daily_forecast(
+        args.city,
+        target_date,
+        out_dir,
         args.debug_labels,
-        weekly_days=daily_days,
-        weekly_min=daily_min,
-        weekly_max=daily_max,
-        weekly_precip=daily_precip,
     )
 
     print(report_text)
