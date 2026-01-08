@@ -12,6 +12,7 @@ import numpy as np
 from matplotlib.ticker import FixedLocator, FuncFormatter
 from matplotlib.transforms import Bbox
 import requests
+import re
 
 
 CITY_COORDS = {
@@ -21,6 +22,7 @@ CITY_COORDS = {
 
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
 API_URL = "https://api.open-meteo.com/v1/forecast"
+GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 UA_WEEKDAYS = [
     "понеділок",
     "вівторок",
@@ -102,6 +104,29 @@ def fetch_forecast(lat: float, lon: float, forecast_days: int) -> dict:
     return response.json()
 
 
+def geocode_city(name: str):
+    params_base = {
+        "name": name,
+        "count": 1,
+        "format": "json",
+        "country": "UA",
+    }
+    for language in ("uk", "ru", "en"):
+        params = {**params_base, "language": language}
+        response = requests.get(GEOCODING_URL, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        results = data.get("results") or []
+        if results:
+            return results[0]
+    return None
+
+
+def make_location_slug(lat: float, lon: float) -> str:
+    safe = f"loc_{lat:.2f}_{lon:.2f}"
+    return re.sub(r"[^a-zA-Z0-9_.-]", "_", safe)
+
+
 def select_target_date(day: str | None, date_str: str | None) -> date:
     today = datetime.now(KYIV_TZ).date()
     if date_str:
@@ -179,7 +204,7 @@ def generate_daily_forecast(
         [item[0] for item in hourly_items],
         [item[1] for item in hourly_items],
         [item[2] for item in hourly_items],
-        f"{city['name']} — {format_ua_date(target_date)}",
+        format_chart_title(city["name"], format_ua_date(target_date)),
         chart_path,
         datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ),
         datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ) + timedelta(hours=23),
@@ -220,7 +245,58 @@ def generate_next24h_forecast(
     chart_path = out_dir / f"{base_name}.png"
 
     text_path.write_text(report_text, encoding="utf-8")
-    title = f"{city['name']} — {start_dt.strftime('%d.%m %H:%M')} +24г"
+    title = format_chart_title(city["name"], f"{start_dt.strftime('%d.%m %H:%M')} +24г")
+    times = [item[0] for item in hourly_items]
+    temps = [item[1] for item in hourly_items]
+    precip = [item[2] for item in hourly_items]
+    daily_days, daily_min, daily_max, daily_precip = extract_weekly_plot_data(data)
+    plot_chart_base(
+        times,
+        temps,
+        precip,
+        title,
+        chart_path,
+        start_dt,
+        end_dt,
+        debug_labels,
+        weekly_days=daily_days,
+        weekly_min=daily_min,
+        weekly_max=daily_max,
+        weekly_precip=daily_precip,
+    )
+    return text_path, chart_path, report_text
+
+
+def generate_next24h_forecast_for_coords(
+    location_name: str,
+    lat: float,
+    lon: float,
+    out_dir: Path,
+    start_dt: datetime | None = None,
+    debug_labels: bool = False,
+) -> tuple[Path, Path, str]:
+    if start_dt is None:
+        start_dt = datetime.now(KYIV_TZ)
+    start_dt = start_dt.replace(minute=0, second=0, microsecond=0)
+    end_dt = start_dt + timedelta(hours=23)
+
+    today = datetime.now(KYIV_TZ).date()
+    days_ahead = (end_dt.date() - today).days
+    forecast_days = max(7, days_ahead + 1)
+    data = fetch_forecast(lat, lon, forecast_days)
+    hourly_items = extract_hourly_range(data, start_dt, end_dt)
+    if not hourly_items:
+        raise SystemExit("Немає погодинних даних для наступних 24 годин.")
+
+    report_text = build_text_report_24h(location_name, start_dt, hourly_items)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base_name = f"{make_location_slug(lat, lon)}_next24h_{start_dt.strftime('%Y-%m-%d_%H%M')}"
+    text_path = out_dir / f"{base_name}.txt"
+    chart_path = out_dir / f"{base_name}.png"
+
+    text_path.write_text(report_text, encoding="utf-8")
+    title = format_chart_title(location_name, f"{start_dt.strftime('%d.%m %H:%M')} +24г")
     times = [item[0] for item in hourly_items]
     temps = [item[1] for item in hourly_items]
     precip = [item[2] for item in hourly_items]
@@ -274,6 +350,13 @@ def format_ua_date(target_date: date) -> str:
     weekday = UA_WEEKDAYS[target_date.weekday()]
     month = UA_MONTHS_GEN[target_date.month - 1]
     return f"{weekday} {target_date.day} {month}"
+
+
+def format_chart_title(location: str, date_label: str) -> str:
+    title = f"{location} — {date_label}"
+    if len(title) > 26:
+        return f"{location}\n— {date_label}"
+    return title
 
 
 def build_text_report(city_name: str, target_date: date, hourly_items, weekly_lines) -> str:
@@ -662,7 +745,9 @@ def plot_chart_base(
             )
 
     fig.tight_layout()
-    fig.subplots_adjust(hspace=0.45, top=0.93)
+    title_lines = title.count("\n") + 1
+    top_margin = 0.93 - 0.03 * (title_lines - 1)
+    fig.subplots_adjust(hspace=0.45, top=max(0.85, top_margin))
     if ax_week is not None:
         pos_temp = ax_temp.get_position()
         pos_precip = ax_precip.get_position()
@@ -695,11 +780,13 @@ def plot_chart_base(
     else:
         fig.align_ylabels([ax_temp, ax_precip])
     pos_temp = ax_temp.get_position()
+    title_align = "left" if "\n" in title else "right"
+    title_x = pos_temp.x0 if title_align == "left" else pos_temp.x1
     fig.text(
-        pos_temp.x1,
+        title_x,
         0.985,
         title,
-        ha="right",
+        ha=title_align,
         va="top",
         fontsize=16,
         fontweight="semibold",
@@ -720,7 +807,7 @@ def plot_chart(
     precip = [item[2] for item in hourly_items]
     start_dt = datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ)
     end_dt = start_dt + timedelta(hours=23)
-    title = f"{city_name} — {format_ua_date(target_date)}"
+    title = format_chart_title(city_name, format_ua_date(target_date))
     plot_chart_base(times, temps, precip, title, output_path, start_dt, end_dt, debug_labels)
 
 

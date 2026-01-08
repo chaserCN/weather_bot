@@ -217,12 +217,41 @@ async def job_today(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def forecast_24h(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     channels_cfg: list[ChannelConfig] = context.bot_data["channels"]
+    out_dir = Path("outputs/bot")
+    if context.args:
+        query = " ".join(context.args).strip()
+        geo = weather_report.geocode_city(query)
+        if not geo:
+            await update.message.reply_text("Не знайшов це місто в Україні.")
+            return
+        location_name = geo["name"]
+        admin = geo.get("admin1")
+        if admin and admin.lower() not in location_name.lower():
+            location_name = f"{location_name}, {admin}"
+        country_code = (geo.get("country_code") or "").upper()
+        if country_code and country_code != "UA":
+            location_name = f"{location_name} ({country_code})"
+        lat = geo["latitude"]
+        lon = geo["longitude"]
+
+        async def task():
+            _, chart_path, _ = await asyncio.to_thread(
+                weather_report.generate_next24h_forecast_for_coords,
+                location_name,
+                lat,
+                lon,
+                out_dir,
+            )
+            with chart_path.open("rb") as photo_file:
+                await update.message.reply_photo(photo=InputFile(photo_file))
+
+        await run_with_chat_action(update.effective_chat.id, context, task)
+        return
+
     channel = resolve_channel(channels_cfg, update.effective_chat.id)
     if not channel:
         await update.message.reply_text("Для цього каналу немає налаштувань.")
         return
-    out_dir = Path("outputs/bot")
-    today = datetime.now(KYIV_TZ).date()
     await run_with_chat_action(
         update.effective_chat.id,
         context,
