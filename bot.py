@@ -222,7 +222,7 @@ async def forecast_24h(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         query = " ".join(context.args).strip()
         geo = weather_report.geocode_city(query)
         if not geo:
-            await update.message.reply_text("Не знайшов це місто в Україні.")
+            await update.message.reply_text("Не знайшов це місто.")
             return
         location_name = geo["name"]
         admin = geo.get("admin1")

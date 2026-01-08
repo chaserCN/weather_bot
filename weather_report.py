@@ -104,22 +104,45 @@ def fetch_forecast(lat: float, lon: float, forecast_days: int) -> dict:
     return response.json()
 
 
+def normalize_place_name(text: str) -> str:
+    return re.sub(r"[^a-zа-яіїєґ0-9]+", "", text.lower())
+
+
 def geocode_city(name: str):
     params_base = {
         "name": name,
-        "count": 1,
+        "count": 10,
         "format": "json",
-        "country": "UA",
     }
+    query_norm = normalize_place_name(name)
+    best = None
+    best_score = (-1, -1)
     for language in ("uk", "ru", "en"):
         params = {**params_base, "language": language}
         response = requests.get(GEOCODING_URL, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         results = data.get("results") or []
-        if results:
-            return results[0]
-    return None
+        for result in results:
+            name_norm = normalize_place_name(result.get("name", ""))
+            if not name_norm:
+                continue
+            if name_norm == query_norm:
+                score = 3
+            elif name_norm.startswith(query_norm) or query_norm.startswith(name_norm):
+                score = 2
+            elif query_norm in name_norm:
+                score = 1
+            else:
+                score = 0
+            population = result.get("population") or 0
+            score_tuple = (score, population)
+            if score_tuple > best_score:
+                best_score = score_tuple
+                best = result
+        if best_score[0] >= 3:
+            break
+    return best
 
 
 def make_location_slug(lat: float, lon: float) -> str:
