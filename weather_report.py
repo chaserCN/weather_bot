@@ -532,6 +532,7 @@ def plot_chart_base(
     plt.setp(ax_temp.get_xticklabels(), rotation=45, ha="right")
     if ax_week is not None:
         ax_week.tick_params(axis="x", labelrotation=45)
+        plt.setp(ax_week.get_xticklabels(), ha="right")
 
     y_ticks = ax_temp.get_yticks()
     has_fractional_ticks = any(abs(tick - round(tick)) > 1e-6 for tick in y_ticks)
