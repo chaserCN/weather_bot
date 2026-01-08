@@ -9,7 +9,7 @@ import matplotlib
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import FixedLocator
+from matplotlib.ticker import FixedLocator, FuncFormatter
 import requests
 
 
@@ -28,6 +28,15 @@ UA_WEEKDAYS = [
     "пʼятниця",
     "субота",
     "неділя",
+]
+UA_WEEKDAYS_SHORT = [
+    "Пон",
+    "Вів",
+    "Сер",
+    "Чет",
+    "Пʼят",
+    "Суб",
+    "Нед",
 ]
 UA_MONTHS_GEN = [
     "січня",
@@ -113,6 +122,8 @@ def build_base_name(city_key: str, day: str | None, date_str: str | None) -> str
     return f"{city_key}_{day}"
 
 
+
+
 def extract_hourly_range(data: dict, start_dt: datetime, end_dt: datetime):
     times = data["hourly"]["time"]
     temps = data["hourly"]["temperature_2m"]
@@ -154,7 +165,23 @@ def generate_daily_forecast(
     chart_path = out_dir / f"{base_name}.png"
 
     text_path.write_text(report_text, encoding="utf-8")
-    plot_chart(city["name"], target_date, hourly_items, chart_path, debug_labels=debug_labels)
+    weekly_demo = False
+    daily_days = [datetime.fromisoformat(day).replace(tzinfo=KYIV_TZ) for day in data["daily"]["time"]]
+    daily_min = data["daily"]["temperature_2m_min"]
+    daily_max = data["daily"]["temperature_2m_max"]
+    plot_chart_base(
+        [item[0] for item in hourly_items],
+        [item[1] for item in hourly_items],
+        [item[2] for item in hourly_items],
+        f"{city['name']} — {format_ua_date(target_date)}",
+        chart_path,
+        datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ),
+        datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ) + timedelta(hours=23),
+        debug_labels,
+        weekly_days=daily_days,
+        weekly_min=daily_min,
+        weekly_max=daily_max,
+    )
     return text_path, chart_path, report_text
 
 
@@ -278,6 +305,10 @@ def plot_chart_base(
     start_dt: datetime,
     end_dt: datetime,
     debug_labels: bool = False,
+    weekly_days=None,
+    weekly_min=None,
+    weekly_max=None,
+    weekly_precip=None,
 ) -> None:
     matplotlib.use("Agg")
     plt.rcParams.update(
@@ -289,10 +320,24 @@ def plot_chart_base(
             "ytick.labelsize": 12,
         }
     )
+    grid_style = {"linestyle": "--", "alpha": 0.3}
+    grid_color = matplotlib.rcParams["grid.color"]
+    grid_width = matplotlib.rcParams["grid.linewidth"]
 
-    fig, (ax_temp, ax_precip) = plt.subplots(
-        nrows=2, ncols=1, figsize=(4.2, 5.9), sharex=True
+    rows = 3 if weekly_days is not None else 2
+    height = 6.9 if rows == 3 else 5.9
+    fig, axes = plt.subplots(
+        nrows=rows,
+        ncols=1,
+        figsize=(4.2, height),
+        sharex=False,
+        gridspec_kw={"height_ratios": [1.6, 1.0, 1.0] if rows == 3 else None},
     )
+    ax_temp = axes[0]
+    ax_precip = axes[1]
+    ax_week = axes[2] if rows == 3 else None
+    if ax_week is not None:
+        ax_precip.sharex(ax_temp)
 
     times_num = mdates.date2num(times)
     dense_num = np.linspace(times_num[0], times_num[-1], len(times_num) * 4)
@@ -308,7 +353,7 @@ def plot_chart_base(
     temp_min = min(temps)
     temp_max = max(temps)
     temp_range = max(temp_max - temp_min, 1.0)
-    ax_temp.set_ylim(temp_min - 0.35 * temp_range, temp_max + 0.35 * temp_range)
+    ax_temp.set_ylim(temp_min - 0.45 * temp_range, temp_max + 0.45 * temp_range)
 
     labeled_indices = [
         idx
@@ -325,10 +370,21 @@ def plot_chart_base(
 
     ax_precip.bar(times, precip, color="#ff7f0e", alpha=0.6, width=0.03)
     ax_precip.set_ylim(0, 100)
+    ax_precip.set_axisbelow(True)
+    for level in (25, 75):
+        ax_precip.axhline(
+            level,
+            color=grid_color,
+            linestyle=(0, (3, 3)),
+            linewidth=grid_width,
+            alpha=grid_style["alpha"],
+        )
 
-    fig.suptitle(title, fontweight="semibold", y=0.98)
-    ax_temp.set_ylabel("Температура (°C)")
-    ax_precip.set_ylabel("Ймовірність опадів (%)")
+    fig.suptitle(title, fontweight="semibold", y=0.985)
+    ax_temp.set_ylabel("Темп. (°C)")
+    ax_precip.set_ylabel("Ймовір. оп. (%)")
+    if ax_week is not None:
+        ax_week.set_ylabel("Темп. (°C)")
 
     set_time_axis(ax_temp, start_dt, end_dt)
     tick_times = []
@@ -339,12 +395,14 @@ def plot_chart_base(
     hour_ticks = FixedLocator(mdates.date2num(tick_times))
     ax_temp.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=KYIV_TZ))
     ax_temp.xaxis.set_major_locator(hour_ticks)
-    ax_temp.tick_params(axis="x", labelrotation=45, labelbottom=True)
+    ax_temp.tick_params(axis="x", labelrotation=45, labelbottom=False)
 
     ax_precip.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=KYIV_TZ))
     ax_precip.xaxis.set_major_locator(hour_ticks)
     plt.setp(ax_precip.get_xticklabels(), rotation=45, ha="right")
     plt.setp(ax_temp.get_xticklabels(), rotation=45, ha="right")
+    if ax_week is not None:
+        ax_week.tick_params(axis="x", labelrotation=45)
 
     y_ticks = ax_temp.get_yticks()
     has_fractional_ticks = any(abs(tick - round(tick)) > 1e-6 for tick in y_ticks)
@@ -468,11 +526,117 @@ def plot_chart_base(
     for idx in sorted(annotate_indices):
         place_label(idx, required=idx in required_indices)
 
-    ax_temp.grid(True, linestyle="--", alpha=0.3)
-    ax_precip.grid(True, linestyle="--", alpha=0.3)
+    ax_temp.grid(True, **grid_style)
+    ax_precip.grid(True, **grid_style)
+    if ax_week is not None:
+        ax_week.grid(True, **grid_style)
+
+    if ax_week is not None:
+        weekly_num = mdates.date2num(weekly_days)
+        dense_week_num = np.linspace(weekly_num[0], weekly_num[-1], len(weekly_num) * 6)
+        dense_min = np.interp(dense_week_num, weekly_num, weekly_min)
+        dense_max = np.interp(dense_week_num, weekly_num, weekly_max)
+        kernel = np.ones(5) / 5
+        pad = 2
+        smooth_min = np.convolve(np.pad(dense_min, (pad, pad), mode="edge"), kernel, mode="valid")
+        smooth_max = np.convolve(np.pad(dense_max, (pad, pad), mode="edge"), kernel, mode="valid")
+        smooth_days = mdates.num2date(dense_week_num, tz=KYIV_TZ)
+
+        ax_week.plot(smooth_days, smooth_max, color="#d62728", linewidth=2)
+        ax_week.plot(smooth_days, smooth_min, color="#1f77b4", linewidth=2)
+        below_top = np.minimum(smooth_max, 0)
+        above_bottom = np.maximum(smooth_min, 0)
+        ax_week.fill_between(
+            smooth_days,
+            smooth_min,
+            below_top,
+            where=smooth_min < 0,
+            color="#1f77b4",
+            alpha=0.35,
+            interpolate=True,
+        )
+        ax_week.fill_between(
+            smooth_days,
+            above_bottom,
+            smooth_max,
+            where=smooth_max > 0,
+            color="#1f77b4",
+            alpha=0.15,
+            interpolate=True,
+        )
+        ax_week.xaxis.set_major_formatter(
+            FuncFormatter(
+                lambda x, pos: f"{UA_WEEKDAYS_SHORT[mdates.num2date(x, tz=KYIV_TZ).weekday()]} ({mdates.num2date(x, tz=KYIV_TZ).strftime('%d')})"
+            )
+        )
+        ax_week.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+        ax_week.set_title("Прогноз на 7 днів", loc="left", fontsize=16, fontweight="semibold", pad=20)
+        week_min = min(weekly_min)
+        week_max = max(weekly_max)
+        week_range = max(week_max - week_min, 1.0)
+        ax_week.set_ylim(week_min - 0.35 * week_range, week_max + 0.35 * week_range)
+        if weekly_precip is not None:
+            for day, pmax in zip(weekly_days, weekly_precip):
+                ax_week.annotate(
+                    f"{pmax:.0f}%",
+                    (mdates.date2num(day), 1.0),
+                    xycoords=("data", "axes fraction"),
+                    textcoords="offset points",
+                    xytext=(0, 2),
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                    clip_on=False,
+                )
+        for day, tmin, tmax in zip(weekly_days, weekly_min, weekly_max):
+            ax_week.annotate(
+                f"{tmax:.0f}°",
+                (day, tmax),
+                textcoords="offset points",
+                xytext=(0, 6),
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
+            ax_week.annotate(
+                f"{tmin:.0f}°",
+                (day, tmin),
+                textcoords="offset points",
+                xytext=(0, -8),
+                ha="center",
+                va="top",
+                fontsize=9,
+            )
 
     fig.tight_layout()
-    fig.subplots_adjust(hspace=0.35, top=0.9)
+    fig.subplots_adjust(hspace=0.45, top=0.93)
+    if ax_week is not None:
+        pos_temp = ax_temp.get_position()
+        pos_precip = ax_precip.get_position()
+        gap_01 = pos_temp.y0 - pos_precip.y1
+        if gap_01 > 0:
+            ax_precip.set_position(
+                [pos_precip.x0, pos_precip.y0 + gap_01, pos_precip.width, pos_precip.height]
+            )
+    if ax_week is not None:
+        pos_temp = ax_temp.get_position()
+        pos_precip = ax_precip.get_position()
+        desired_gap_01 = 0.01
+        gap_01 = pos_temp.y0 - pos_precip.y1
+        if gap_01 > desired_gap_01:
+            shift_up = gap_01 - desired_gap_01
+            ax_precip.set_position(
+                [pos_precip.x0, pos_precip.y0 + shift_up, pos_precip.width, pos_precip.height]
+            )
+        pos_precip = ax_precip.get_position()
+        pos_week = ax_week.get_position()
+        desired_gap_12 = 0.1
+        gap_12 = pos_precip.y0 - pos_week.y1
+        if gap_12 < desired_gap_12:
+            shift_down = desired_gap_12 - gap_12
+            ax_week.set_position(
+                [pos_week.x0, pos_week.y0 - shift_down, pos_week.width, pos_week.height]
+            )
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
 
@@ -521,12 +685,24 @@ def main() -> None:
     chart_path = out_dir / f"{base_name}.png"
 
     text_path.write_text(report_text, encoding="utf-8")
-    plot_chart(
-        city["name"],
-        target_date,
-        hourly_items,
+    weekly_demo = False
+    daily_days = [datetime.fromisoformat(day).replace(tzinfo=KYIV_TZ) for day in data["daily"]["time"]]
+    daily_min = data["daily"]["temperature_2m_min"]
+    daily_max = data["daily"]["temperature_2m_max"]
+    daily_precip = data["daily"]["precipitation_probability_max"]
+    plot_chart_base(
+        [item[0] for item in hourly_items],
+        [item[1] for item in hourly_items],
+        [item[2] for item in hourly_items],
+        f"{city['name']} — {format_ua_date(target_date)}",
         chart_path,
-        debug_labels=args.debug_labels,
+        datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ),
+        datetime.combine(target_date, dt_time(0, 0), tzinfo=KYIV_TZ) + timedelta(hours=23),
+        args.debug_labels,
+        weekly_days=daily_days,
+        weekly_min=daily_min,
+        weekly_max=daily_max,
+        weekly_precip=daily_precip,
     )
 
     print(report_text)

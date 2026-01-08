@@ -130,23 +130,18 @@ def resolve_channel(channels_cfg: list[ChannelConfig], chat_id: int) -> ChannelC
     return None
 
 
-async def send_forecast24_with_today_text(
+async def send_forecast24_chart(
     channel: ChannelConfig,
-    today: datetime.date,
     out_dir: Path,
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    _, _, report_text = await asyncio.to_thread(
-        weather_report.generate_daily_forecast, channel.city, today, out_dir
-    )
     _, chart_path, _ = await asyncio.to_thread(
         weather_report.generate_next24h_forecast, channel.city, out_dir
     )
     with chart_path.open("rb") as photo_file:
         await update.message.reply_photo(
             photo=InputFile(photo_file),
-            caption=report_text,
         )
 
 
@@ -172,14 +167,11 @@ async def send_daily_forecast(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     out_dir = Path("outputs/bot")
-    _, chart_path, report_text = weather_report.generate_daily_forecast(
-        city, target_date, out_dir
-    )
+    _, chart_path, _ = weather_report.generate_daily_forecast(city, target_date, out_dir)
     with chart_path.open("rb") as photo_file:
         await context.bot.send_photo(
             chat_id=chat_id,
             photo=InputFile(photo_file),
-            caption=report_text,
         )
 
 
@@ -234,7 +226,7 @@ async def forecast_24h(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await run_with_chat_action(
         update.effective_chat.id,
         context,
-        lambda: send_forecast24_with_today_text(channel, today, out_dir, update, context),
+        lambda: send_forecast24_chart(channel, out_dir, update, context),
     )
 
 
