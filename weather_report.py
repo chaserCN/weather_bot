@@ -241,7 +241,7 @@ def generate_daily_forecast(
     if days_ahead >= 16:
         raise SystemExit("Доступний прогноз лише на 16 днів уперед.")
 
-    forecast_days = max(7, days_ahead + 1)
+    forecast_days = max(10, days_ahead + 1)
     data = fetch_forecast(city["lat"], city["lon"], forecast_days)
     hourly_items = extract_hourly(data, target_date)
     if not hourly_items:
@@ -287,7 +287,7 @@ def generate_next24h_forecast(
 
     today = datetime.now(KYIV_TZ).date()
     days_ahead = (end_dt.date() - today).days
-    forecast_days = max(7, days_ahead + 1)
+    forecast_days = max(10, days_ahead + 1)
     data = fetch_forecast(city["lat"], city["lon"], forecast_days)
     hourly_items = extract_hourly_range(data, start_dt, end_dt)
     if not hourly_items:
@@ -338,7 +338,7 @@ def generate_next24h_forecast_for_coords(
 
     today = datetime.now(KYIV_TZ).date()
     days_ahead = (end_dt.date() - today).days
-    forecast_days = max(7, days_ahead + 1)
+    forecast_days = max(10, days_ahead + 1)
     data = fetch_forecast(lat, lon, forecast_days)
     hourly_items = extract_hourly_range(data, start_dt, end_dt)
     if not hourly_items:
@@ -614,8 +614,8 @@ def plot_chart_base(
             "font.size": 13,
             "axes.titlesize": 16,
             "axes.labelsize": 14,
-            "xtick.labelsize": 12,
-            "ytick.labelsize": 12,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
         }
     )
     grid_style = {"linestyle": "--", "alpha": 0.3}
@@ -803,7 +803,7 @@ def plot_chart_base(
                     xytext=(dx * scale, dy * scale),
                     ha=ha,
                     va=va,
-                    fontsize=12,
+                    fontsize=11,
                     clip_on=True,
                 )
                 fig.canvas.draw()
@@ -864,7 +864,7 @@ def plot_chart_base(
                 xytext=(0, 10),
                 ha="center",
                 va="bottom",
-                fontsize=12,
+                fontsize=11,
                 clip_on=True,
             )
             fig.canvas.draw()
@@ -917,7 +917,7 @@ def plot_chart_base(
             )
         )
         ax_week.xaxis.set_major_locator(mdates.DayLocator(interval=1))
-        ax_week.set_title("Прогноз на 7 днів", loc="left", fontsize=16, fontweight="semibold", pad=20)
+        ax_week.set_title("Прогноз на 10 днів", loc="left", fontsize=16, fontweight="semibold", pad=20)
         week_min = min(weekly_min)
         week_max = max(weekly_max)
         week_range = max(week_max - week_min, 1.0)
