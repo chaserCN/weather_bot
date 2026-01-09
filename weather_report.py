@@ -94,10 +94,11 @@ def fetch_forecast(lat: float, lon: float, forecast_days: int) -> dict:
     params = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": "temperature_2m,precipitation_probability",
+        "hourly": "temperature_2m,apparent_temperature,precipitation_probability",
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
         "forecast_days": forecast_days,
         "timezone": "Europe/Kyiv",
+        "current_weather": True,
     }
     response = requests.get(API_URL, params=params, timeout=30)
     response.raise_for_status()
@@ -425,12 +426,47 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
     tmin = data["daily"]["temperature_2m_min"]
     tmax = data["daily"]["temperature_2m_max"]
     pmax = data["daily"]["precipitation_probability_max"]
+    now = datetime.now(KYIV_TZ)
 
     def find_range(target: date):
         for day_str, mn, mx, pr in zip(days, tmin, tmax, pmax):
             if datetime.fromisoformat(day_str).date() == target:
                 return mn, mx, pr
         return None
+
+    def find_current_hour_prob():
+        times = data["hourly"]["time"]
+        probs = data["hourly"]["precipitation_probability"]
+        if not times or not probs:
+            return None
+        best_idx = None
+        best_delta = None
+        for idx, time_str in enumerate(times):
+            dt = datetime.fromisoformat(time_str).replace(tzinfo=KYIV_TZ)
+            delta = abs((dt - now).total_seconds())
+            if best_delta is None or delta < best_delta:
+                best_delta = delta
+                best_idx = idx
+        if best_idx is None:
+            return None
+        return probs[best_idx]
+
+    def find_current_apparent():
+        times = data["hourly"]["time"]
+        feels = data["hourly"]["apparent_temperature"]
+        if not times or not feels:
+            return None
+        best_idx = None
+        best_delta = None
+        for idx, time_str in enumerate(times):
+            dt = datetime.fromisoformat(time_str).replace(tzinfo=KYIV_TZ)
+            delta = abs((dt - now).total_seconds())
+            if best_delta is None or delta < best_delta:
+                best_delta = delta
+                best_idx = idx
+        if best_idx is None:
+            return None
+        return feels[best_idx]
 
     lines = []
     today_range = find_range(today)
@@ -441,6 +477,20 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
     if tomorrow_range:
         mn, mx, pr = tomorrow_range
         lines.append(f"завтра: мін {mn:.0f}º, макс {mx:.0f}º, 🌧 {pr:.0f}%")
+    current = data.get("current_weather") or {}
+    current_temp = current.get("temperature")
+    current_feels = find_current_apparent()
+    current_prob = find_current_hour_prob()
+    if current_temp is not None or current_feels is not None or current_prob is not None:
+        lines.append("")
+        parts = []
+        if current_temp is not None:
+            parts.append(f"{current_temp:.0f}º")
+        if current_feels is not None:
+            parts.append(f"відчувається як {current_feels:.0f}º")
+        if current_prob is not None:
+            parts.append(f"🌧 {current_prob:.0f}%")
+        lines.append(f"зараз: {', '.join(parts)}")
     return "\n".join(lines)
 
 
