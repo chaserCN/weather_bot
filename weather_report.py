@@ -213,8 +213,7 @@ def generate_daily_forecast(
     if not hourly_items:
         raise SystemExit("Немає погодинних даних для вибраної дати.")
 
-    weekly_lines = build_weekly_lines(data, today)
-    report_text = build_text_report(city["name"], target_date, hourly_items, weekly_lines)
+    report_text = build_two_day_summary_from_data(data, today)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     base_name = build_base_name(city_key, None, target_date.isoformat())
@@ -260,7 +259,7 @@ def generate_next24h_forecast(
     if not hourly_items:
         raise SystemExit("Немає погодинних даних для наступних 24 годин.")
 
-    report_text = build_text_report_24h(city["name"], start_dt, hourly_items)
+    report_text = build_two_day_summary_from_data(data, today)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     base_name = f"{city_key}_next24h_{start_dt.strftime('%Y-%m-%d_%H%M')}"
@@ -311,7 +310,7 @@ def generate_next24h_forecast_for_coords(
     if not hourly_items:
         raise SystemExit("Немає погодинних даних для наступних 24 годин.")
 
-    report_text = build_text_report_24h(location_name, start_dt, hourly_items)
+    report_text = build_two_day_summary_from_data(data, today)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     base_name = f"{make_location_slug(lat, lon)}_next24h_{start_dt.strftime('%Y-%m-%d_%H%M')}"
