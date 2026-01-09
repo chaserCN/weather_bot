@@ -445,10 +445,27 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
     return "\n".join(lines)
 
 
+def build_day_summary_from_data(data: dict, target: date, label: str) -> str:
+    days = data["daily"]["time"]
+    tmin = data["daily"]["temperature_2m_min"]
+    tmax = data["daily"]["temperature_2m_max"]
+    pmax = data["daily"]["precipitation_probability_max"]
+    for day_str, mn, mx, pr in zip(days, tmin, tmax, pmax):
+        if datetime.fromisoformat(day_str).date() == target:
+            return f"{label}: мін {mn:.0f}º, макс {mx:.0f}º, 🌧 {pr:.0f}%"
+    return ""
+
+
 def build_two_day_summary_for_city(city_key: str, today: date | None = None) -> str:
     city = CITY_COORDS[city_key]
     data = fetch_forecast(city["lat"], city["lon"], 2)
     return build_two_day_summary_from_data(data, today)
+
+
+def build_day_summary_for_city(city_key: str, target: date, label: str) -> str:
+    city = CITY_COORDS[city_key]
+    data = fetch_forecast(city["lat"], city["lon"], 2)
+    return build_day_summary_from_data(data, target, label)
 
 
 def build_two_day_summary_for_coords(

@@ -169,10 +169,12 @@ async def send_daily_forecast(
     city: str,
     target_date: datetime.date,
     context: ContextTypes.DEFAULT_TYPE,
+    caption: str | None = None,
 ) -> None:
     out_dir = Path("outputs/bot")
     _, chart_path, _ = weather_report.generate_daily_forecast(city, target_date, out_dir)
-    caption = await asyncio.to_thread(weather_report.build_two_day_summary_for_city, city)
+    if caption is None:
+        caption = await asyncio.to_thread(weather_report.build_two_day_summary_for_city, city)
     with chart_path.open("rb") as photo_file:
         await context.bot.send_photo(
             chat_id=chat_id,
@@ -210,7 +212,10 @@ async def send_ventusky_square(
 async def job_tomorrow(context: ContextTypes.DEFAULT_TYPE) -> None:
     channel: ChannelConfig = context.job.data["channel"]
     tomorrow = datetime.now(KYIV_TZ).date() + timedelta(days=1)
-    await send_daily_forecast(channel.chat_id, channel.city, tomorrow, context)
+    caption = await asyncio.to_thread(
+        weather_report.build_day_summary_for_city, channel.city, tomorrow, "завтра"
+    )
+    await send_daily_forecast(channel.chat_id, channel.city, tomorrow, context, caption)
 
 
 async def job_today(context: ContextTypes.DEFAULT_TYPE) -> None:
