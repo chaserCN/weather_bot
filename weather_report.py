@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import math
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from pathlib import Path
@@ -716,15 +717,25 @@ def plot_chart_base(
         ax_week.tick_params(axis="x", labelrotation=45)
         plt.setp(ax_week.get_xticklabels(), ha="right")
 
+    def format_temp_value(value: float, decimals: int) -> str:
+        if decimals == 0:
+            truncated = math.trunc(value)
+            return f"{truncated:.0f}°"
+        return f"{value:.1f}°"
+
     y_ticks = ax_temp.get_yticks()
     has_fractional_ticks = any(abs(tick - round(tick)) > 1e-6 for tick in y_ticks)
-    label_fmt = "{:.1f}°" if has_fractional_ticks else "{:.0f}°"
-    ax_temp.yaxis.set_major_formatter(FuncFormatter(lambda v, pos: label_fmt.format(v)))
+    decimals = 1 if has_fractional_ticks else 0
+    ax_temp.yaxis.set_major_formatter(
+        FuncFormatter(lambda v, pos: format_temp_value(v, decimals))
+    )
     if ax_week is not None:
         week_ticks = ax_week.get_yticks()
         week_has_fractional = any(abs(tick - round(tick)) > 1e-6 for tick in week_ticks)
-        week_fmt = "{:.1f}°" if week_has_fractional else "{:.0f}°"
-        ax_week.yaxis.set_major_formatter(FuncFormatter(lambda v, pos: week_fmt.format(v)))
+        week_decimals = 1 if week_has_fractional else 0
+        ax_week.yaxis.set_major_formatter(
+            FuncFormatter(lambda v, pos: format_temp_value(v, week_decimals))
+        )
 
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
@@ -797,7 +808,7 @@ def plot_chart_base(
                 if debug_labels:
                     print(f"  try offset=({dx * scale:.1f},{dy * scale:.1f}) ha={ha} va={va}")
                 text = ax_temp.annotate(
-                    label_fmt.format(temp),
+                    format_temp_value(temp, decimals),
                     (time, temp),
                     textcoords="offset points",
                     xytext=(dx * scale, dy * scale),
@@ -858,7 +869,7 @@ def plot_chart_base(
             if debug_labels:
                 print("  -> forced placement")
             text = ax_temp.annotate(
-                label_fmt.format(temp),
+                format_temp_value(temp, decimals),
                 (time, temp),
                 textcoords="offset points",
                 xytext=(0, 10),
