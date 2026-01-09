@@ -213,7 +213,7 @@ async def job_tomorrow(context: ContextTypes.DEFAULT_TYPE) -> None:
     channel: ChannelConfig = context.job.data["channel"]
     tomorrow = datetime.now(KYIV_TZ).date() + timedelta(days=1)
     caption = await asyncio.to_thread(
-        weather_report.build_day_summary_for_city, channel.city, tomorrow, "завтра"
+        weather_report.build_tomorrow_with_current_for_city, channel.city
     )
     await send_daily_forecast(channel.chat_id, channel.city, tomorrow, context, caption)
 

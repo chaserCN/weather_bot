@@ -569,6 +569,20 @@ def build_day_summary_from_data(data: dict, target: date, label: str) -> str:
     return ""
 
 
+def build_tomorrow_with_current_from_data(data: dict, today: date | None = None) -> str:
+    if today is None:
+        today = datetime.now(KYIV_TZ).date()
+    tomorrow = today + timedelta(days=1)
+    tomorrow_line = build_day_summary_from_data(data, tomorrow, "завтра")
+    current_block = build_two_day_summary_from_data(data, today).split("\n\n", 1)
+    current_line = ""
+    if len(current_block) == 2 and current_block[1].strip():
+        current_line = current_block[1].strip()
+    if current_line:
+        return "\n\n".join([tomorrow_line, current_line])
+    return tomorrow_line
+
+
 def build_two_day_summary_for_city(city_key: str, today: date | None = None) -> str:
     city = CITY_COORDS[city_key]
     data = fetch_forecast(city["lat"], city["lon"], 2)
@@ -579,6 +593,12 @@ def build_day_summary_for_city(city_key: str, target: date, label: str) -> str:
     city = CITY_COORDS[city_key]
     data = fetch_forecast(city["lat"], city["lon"], 2)
     return build_day_summary_from_data(data, target, label)
+
+
+def build_tomorrow_with_current_for_city(city_key: str, today: date | None = None) -> str:
+    city = CITY_COORDS[city_key]
+    data = fetch_forecast(city["lat"], city["lon"], 2)
+    return build_tomorrow_with_current_from_data(data, today)
 
 
 def build_two_day_summary_for_coords(
