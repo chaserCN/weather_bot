@@ -425,22 +425,23 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
     days = data["daily"]["time"]
     tmin = data["daily"]["temperature_2m_min"]
     tmax = data["daily"]["temperature_2m_max"]
+    pmax = data["daily"]["precipitation_probability_max"]
 
     def find_range(target: date):
-        for day_str, mn, mx in zip(days, tmin, tmax):
+        for day_str, mn, mx, pr in zip(days, tmin, tmax, pmax):
             if datetime.fromisoformat(day_str).date() == target:
-                return mn, mx
+                return mn, mx, pr
         return None
 
     lines = []
     today_range = find_range(today)
     if today_range:
-        mn, mx = today_range
-        lines.append(f"сьогодні: від {mn:.0f}º до {mx:.0f}º")
+        mn, mx, pr = today_range
+        lines.append(f"сьогодні: мін {mn:.0f}º, макс {mx:.0f}º, 🌧 {pr:.0f}%")
     tomorrow_range = find_range(tomorrow)
     if tomorrow_range:
-        mn, mx = tomorrow_range
-        lines.append(f"завтра: від {mn:.0f}º до {mx:.0f}º")
+        mn, mx, pr = tomorrow_range
+        lines.append(f"завтра: мін {mn:.0f}º, макс {mx:.0f}º, 🌧 {pr:.0f}%")
     return "\n".join(lines)
 
 
