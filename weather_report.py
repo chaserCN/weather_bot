@@ -190,8 +190,41 @@ def extract_weekly_plot_data(data: dict):
     daily_days = [datetime.fromisoformat(day).replace(tzinfo=KYIV_TZ) for day in data["daily"]["time"]]
     daily_min = data["daily"]["temperature_2m_min"]
     daily_max = data["daily"]["temperature_2m_max"]
-    daily_precip = data["daily"]["precipitation_probability_max"]
+    daily_precip = compute_daily_precip_probabilities(data)
     return daily_days, daily_min, daily_max, daily_precip
+
+
+def compute_daily_precip_probabilities(data: dict) -> list[float]:
+    days = data["daily"]["time"]
+    hourly_times = data["hourly"]["time"]
+    hourly_probs = data["hourly"]["precipitation_probability"]
+    if not hourly_times or not hourly_probs:
+        return data["daily"]["precipitation_probability_max"]
+    today = datetime.now(KYIV_TZ).date()
+    now = datetime.now(KYIV_TZ)
+    result = []
+    for day_str in days:
+        target = datetime.fromisoformat(day_str).date()
+        probs = []
+        for time_str, prob in zip(hourly_times, hourly_probs):
+            dt = datetime.fromisoformat(time_str).replace(tzinfo=KYIV_TZ)
+            if dt.date() != target:
+                continue
+            if target == today and dt < now:
+                continue
+            probs.append(prob / 100.0)
+        if not probs:
+            result.append(0.0)
+            continue
+        p_max = max(probs)
+        p_union = 1.0
+        for p in probs:
+            p_union *= (1 - p)
+        p_union = 1 - p_union
+        f = 0.3
+        p_final = p_max + f * (p_union - p_max)
+        result.append(p_final * 100.0)
+    return result
 
 
 def generate_daily_forecast(
@@ -436,19 +469,27 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
                 return mn, mx, pr
         return None
 
-    def max_prob_from_now(target: date):
+    def prob_from_hours(target: date, from_now: bool) -> float | None:
         if not hourly_times or not hourly_probs:
             return None
-        best = None
+        probs = []
         for time_str, prob in zip(hourly_times, hourly_probs):
             dt = datetime.fromisoformat(time_str).replace(tzinfo=KYIV_TZ)
             if dt.date() != target:
                 continue
-            if dt < now:
+            if from_now and dt < now:
                 continue
-            if best is None or prob > best:
-                best = prob
-        return best
+            probs.append(prob / 100.0)
+        if not probs:
+            return None
+        p_max = max(probs)
+        p_union = 1.0
+        for p in probs:
+            p_union *= (1 - p)
+        p_union = 1 - p_union
+        f = 0.3
+        p_final = p_max + f * (p_union - p_max)
+        return p_final * 100.0
 
     def find_current_hour_prob():
         times = data["hourly"]["time"]
@@ -488,13 +529,16 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
     today_range = find_range(today)
     if today_range:
         mn, mx, pr = today_range
-        pr_from_now = max_prob_from_now(today)
+        pr_from_now = prob_from_hours(today, from_now=True)
         if pr_from_now is not None:
             pr = pr_from_now
         lines.append(f"сьогодні: мін {mn:.0f}º, макс {mx:.0f}º, 🌧 {pr:.0f}%")
     tomorrow_range = find_range(tomorrow)
     if tomorrow_range:
         mn, mx, pr = tomorrow_range
+        pr_full = prob_from_hours(tomorrow, from_now=False)
+        if pr_full is not None:
+            pr = pr_full
         lines.append(f"завтра: мін {mn:.0f}º, макс {mx:.0f}º, 🌧 {pr:.0f}%")
     current = data.get("current_weather") or {}
     current_temp = current.get("temperature")
@@ -603,7 +647,16 @@ def plot_chart_base(
     smooth_temps = np.convolve(padded, kernel, mode="valid")
     smooth_times = mdates.num2date(dense_num, tz=KYIV_TZ)
 
-    ax_temp.plot(smooth_times, smooth_temps, color="#1f77b4", linewidth=2.5)
+    now = datetime.now(KYIV_TZ)
+    past_mask = [t <= now for t in smooth_times]
+    if any(past_mask):
+        past_times = [t for t, is_past in zip(smooth_times, past_mask) if is_past]
+        past_temps = [v for v, is_past in zip(smooth_temps, past_mask) if is_past]
+        ax_temp.plot(past_times, past_temps, color="#dddddd", linewidth=2.5)
+    if not all(past_mask):
+        future_times = [t for t, is_past in zip(smooth_times, past_mask) if not is_past]
+        future_temps = [v for v, is_past in zip(smooth_temps, past_mask) if not is_past]
+        ax_temp.plot(future_times, future_temps, color="#1f77b4", linewidth=2.5)
     temp_min = min(temps)
     temp_max = max(temps)
     temp_range = max(temp_max - temp_min, 1.0)
@@ -616,18 +669,20 @@ def plot_chart_base(
     ]
     marker_times = [times[idx] for idx in labeled_indices]
     marker_temps = [temps[idx] for idx in labeled_indices]
-    ax_temp.scatter(marker_times, marker_temps, color="#1f77b4", s=60, zorder=3)
+    marker_colors = ["#dddddd" if t <= now else "#1f77b4" for t in marker_times]
+    ax_temp.scatter(marker_times, marker_temps, color=marker_colors, s=60, zorder=3)
 
     min_index = temps.index(temp_min)
     max_index = temps.index(temp_max)
     annotate_indices = set(labeled_indices)
 
-    ax_precip.bar(times, precip, color="#ff7f0e", alpha=0.6, width=0.03)
+    bar_colors = ["#dddddd" if t <= now else "#ff7f0e" for t in times]
+    ax_precip.bar(times, precip, color=bar_colors, alpha=0.6, width=0.03)
     ax_precip.set_ylim(0, 100)
     ax_precip.set_axisbelow(True)
     ax_precip.set_yticks([0, 25, 50, 75, 100])
-    ax_precip.set_yticklabels(["0", "25", "50", "75", ""])
-    ax_precip.tick_params(axis="y", colors="#666666")
+    ax_precip.set_yticklabels(["0%", "25%", "50%", "75%", ""])
+    ax_precip.tick_params(axis="y")
     for level in (25, 75):
         ax_precip.axhline(
             level,
@@ -637,10 +692,10 @@ def plot_chart_base(
             alpha=grid_style["alpha"],
         )
 
-    ax_temp.set_ylabel("Темп. (°C)")
-    ax_precip.set_ylabel("Ймовір. оп. (%)", color="#666666")
+    ax_temp.set_ylabel("")
+    ax_precip.set_ylabel("")
     if ax_week is not None:
-        ax_week.set_ylabel("Темп. (°C)")
+        ax_week.set_ylabel("")
 
     set_time_axis(ax_temp, start_dt, end_dt)
     tick_times = []
@@ -664,6 +719,12 @@ def plot_chart_base(
     y_ticks = ax_temp.get_yticks()
     has_fractional_ticks = any(abs(tick - round(tick)) > 1e-6 for tick in y_ticks)
     label_fmt = "{:.1f}°" if has_fractional_ticks else "{:.0f}°"
+    ax_temp.yaxis.set_major_formatter(FuncFormatter(lambda v, pos: label_fmt.format(v)))
+    if ax_week is not None:
+        week_ticks = ax_week.get_yticks()
+        week_has_fractional = any(abs(tick - round(tick)) > 1e-6 for tick in week_ticks)
+        week_fmt = "{:.1f}°" if week_has_fractional else "{:.0f}°"
+        ax_week.yaxis.set_major_formatter(FuncFormatter(lambda v, pos: week_fmt.format(v)))
 
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
