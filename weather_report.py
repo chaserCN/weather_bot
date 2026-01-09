@@ -221,7 +221,7 @@ def compute_daily_precip_probabilities(data: dict) -> list[float]:
         for p in probs:
             p_union *= (1 - p)
         p_union = 1 - p_union
-        f = 0.3
+        f = 0.2
         p_final = p_max + f * (p_union - p_max)
         result.append(p_final * 100.0)
     return result
@@ -487,7 +487,7 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
         for p in probs:
             p_union *= (1 - p)
         p_union = 1 - p_union
-        f = 0.3
+        f = 0.2
         p_final = p_max + f * (p_union - p_max)
         return p_final * 100.0
 
