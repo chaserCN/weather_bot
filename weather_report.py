@@ -426,6 +426,8 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
     tmin = data["daily"]["temperature_2m_min"]
     tmax = data["daily"]["temperature_2m_max"]
     pmax = data["daily"]["precipitation_probability_max"]
+    hourly_times = data["hourly"]["time"]
+    hourly_probs = data["hourly"]["precipitation_probability"]
     now = datetime.now(KYIV_TZ)
 
     def find_range(target: date):
@@ -433,6 +435,20 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
             if datetime.fromisoformat(day_str).date() == target:
                 return mn, mx, pr
         return None
+
+    def max_prob_from_now(target: date):
+        if not hourly_times or not hourly_probs:
+            return None
+        best = None
+        for time_str, prob in zip(hourly_times, hourly_probs):
+            dt = datetime.fromisoformat(time_str).replace(tzinfo=KYIV_TZ)
+            if dt.date() != target:
+                continue
+            if dt < now:
+                continue
+            if best is None or prob > best:
+                best = prob
+        return best
 
     def find_current_hour_prob():
         times = data["hourly"]["time"]
@@ -472,6 +488,9 @@ def build_two_day_summary_from_data(data: dict, today: date | None = None) -> st
     today_range = find_range(today)
     if today_range:
         mn, mx, pr = today_range
+        pr_from_now = max_prob_from_now(today)
+        if pr_from_now is not None:
+            pr = pr_from_now
         lines.append(f"сьогодні: мін {mn:.0f}º, макс {mx:.0f}º, 🌧 {pr:.0f}%")
     tomorrow_range = find_range(tomorrow)
     if tomorrow_range:
