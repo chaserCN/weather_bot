@@ -139,9 +139,13 @@ async def send_forecast24_chart(
     _, chart_path, _ = await asyncio.to_thread(
         weather_report.generate_next24h_forecast, channel.city, out_dir
     )
+    caption = await asyncio.to_thread(
+        weather_report.build_two_day_summary_for_city, channel.city
+    )
     with chart_path.open("rb") as photo_file:
         await update.message.reply_photo(
             photo=InputFile(photo_file),
+            caption=caption or None,
         )
 
 
@@ -168,10 +172,12 @@ async def send_daily_forecast(
 ) -> None:
     out_dir = Path("outputs/bot")
     _, chart_path, _ = weather_report.generate_daily_forecast(city, target_date, out_dir)
+    caption = await asyncio.to_thread(weather_report.build_two_day_summary_for_city, city)
     with chart_path.open("rb") as photo_file:
         await context.bot.send_photo(
             chat_id=chat_id,
             photo=InputFile(photo_file),
+            caption=caption or None,
         )
 
 
@@ -242,8 +248,14 @@ async def forecast_24h(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 lon,
                 out_dir,
             )
+            caption = await asyncio.to_thread(
+                weather_report.build_two_day_summary_for_coords, lat, lon
+            )
             with chart_path.open("rb") as photo_file:
-                await update.message.reply_photo(photo=InputFile(photo_file))
+                await update.message.reply_photo(
+                    photo=InputFile(photo_file),
+                    caption=caption or None,
+                )
 
         await run_with_chat_action(update.effective_chat.id, context, task)
         return

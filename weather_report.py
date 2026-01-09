@@ -418,6 +418,47 @@ def build_text_report_24h(city_name: str, start_dt: datetime, hourly_items) -> s
     return "\n".join(header + build_hourly_24h_lines_table(hourly_items) + [""])
 
 
+def build_two_day_summary_from_data(data: dict, today: date | None = None) -> str:
+    if today is None:
+        today = datetime.now(KYIV_TZ).date()
+    tomorrow = today + timedelta(days=1)
+    days = data["daily"]["time"]
+    tmin = data["daily"]["temperature_2m_min"]
+    tmax = data["daily"]["temperature_2m_max"]
+
+    def find_range(target: date):
+        for day_str, mn, mx in zip(days, tmin, tmax):
+            if datetime.fromisoformat(day_str).date() == target:
+                return mn, mx
+        return None
+
+    lines = []
+    today_range = find_range(today)
+    if today_range:
+        mn, mx = today_range
+        lines.append(f"сьогодні: від {mn:.0f}º до {mx:.0f}º")
+    tomorrow_range = find_range(tomorrow)
+    if tomorrow_range:
+        mn, mx = tomorrow_range
+        lines.append(f"завтра: від {mn:.0f}º до {mx:.0f}º")
+    return "\n".join(lines)
+
+
+def build_two_day_summary_for_city(city_key: str, today: date | None = None) -> str:
+    city = CITY_COORDS[city_key]
+    data = fetch_forecast(city["lat"], city["lon"], 2)
+    return build_two_day_summary_from_data(data, today)
+
+
+def build_two_day_summary_for_coords(
+    lat: float,
+    lon: float,
+    today: date | None = None,
+) -> str:
+    data = fetch_forecast(lat, lon, 2)
+    return build_two_day_summary_from_data(data, today)
+
+
 def set_time_axis(ax, start_dt: datetime, end_dt: datetime) -> None:
     padding = timedelta(minutes=45)
     ax.set_xlim(start_dt - padding, end_dt + padding)
